@@ -13,17 +13,40 @@ function fname(file: File): string {
 
 export default function Home() {
   const [state, setState] = useState<"initial"|"processing"|"done"|"error">("initial");
+  const [progress, setProgress] = useState<number|undefined>();
+  const pre = useRef<HTMLPreElement>(null);
 
   const [ffmpeg, setFfmpeg] = useState<FFmpeg | null>(null);
   useEffect(() => {
-    setFfmpeg(createFFmpeg({
+    const ffmpeg = createFFmpeg({
       log: true,
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
-    }));
-  }, [setFfmpeg]);
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js',
+      logger({type, message}) {
+        if (!pre.current) {
+          return;
+        }
+        pre.current.append(`[${type}] ${message}\n`);
+      },
+      progress({ratio}) {
+        setProgress(ratio);
+      },
+    });
 
-  const img = useRef<HTMLImageElement>(null);
+    (async () => {
+      await ffmpeg.load();
+      setFfmpeg(ffmpeg);
+    })();
 
+    return () => {
+      if (ffmpeg.isLoaded()) {
+        ffmpeg.exit();
+      }
+      setFfmpeg(null);
+      setProgress(void 0);
+    }
+  }, [setFfmpeg, pre, setProgress]);
+
+  const [src, setSrc] = useState<string | undefined>();
   const [file, setFile] = useState<File | null>(null);
   useEffect(() => {
     if (!file || !ffmpeg) {
@@ -31,18 +54,14 @@ export default function Home() {
     }
 
     (async () => {
-      if (!img.current) {
-        return;
-      }
-
       setState("processing");
       try {
-        await ffmpeg?.load();
         const name = fname(file);
         ffmpeg.FS('writeFile', name, await fetchFile(file));
-        await ffmpeg.run('-i', name, '-r', '10', 'output.gif');
+        //await ffmpeg.run('-i', name, '-r', '10', 'output.gif');
+        await ffmpeg.run('-i', name, '-filter_complex', '[0:v] fps=10,scale=640:-1,split [a][b];[a] palettegen [p];[b][p] paletteuse=dither=floyd_steinberg', 'output.gif');
         const data = ffmpeg.FS('readFile', 'output.gif');
-        img.current.src = URL.createObjectURL(new Blob([data.buffer], { type: 'image/gif' }));
+        setSrc(URL.createObjectURL(new Blob([data.buffer], { type: 'image/gif' })));
         setState("done");
       } catch (e) {
         setState("error");
@@ -50,7 +69,7 @@ export default function Home() {
       }
 
     })();
-  }, [img, ffmpeg, file, setState]);
+  }, [setSrc, ffmpeg, file, setState]);
 
   const handler = useCallback((evt: FormEvent<HTMLInputElement>): any => {
     setFile(((evt.target as HTMLInputElement).files ?? [])[0]);
@@ -68,10 +87,13 @@ export default function Home() {
       </Head>
 
       <main>
-        {state === "initial" ? <input type="file" onInput={handler} accept="video/*"/> : null }
-        {state === "processing" ? <div>processing...</div> : null }
+        {state !== "done" ? <>
+          <input type="file" onInput={handler} accept="video/*"/>
+          { typeof progress !== "undefined" ? <progress value={progress} /> : null }
+          <pre ref={pre}></pre>
+        </> : null }
         {state === "error" ? <div>ERROR OCCURRED.</div> : null }
-        <img ref={img}/>
+        <img src={src}/>
       </main>
     </div>
   )
