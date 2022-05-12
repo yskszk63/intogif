@@ -72,7 +72,11 @@ export default function Home() {
   }, [setSrc, ffmpeg, file, setState]);
 
   const handler = useCallback((evt: FormEvent<HTMLInputElement>): any => {
-    setFile(((evt.target as HTMLInputElement).files ?? [])[0]);
+    const file = evt.currentTarget.files?.[0];
+    if (typeof file === "undefined") {
+      return void setFile(null);
+    }
+    setFile(file);
   }, [setFile]);
 
   return (
